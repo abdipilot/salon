@@ -1,0 +1,111 @@
+version: '3.8'
+
+services:
+  salon-postgres:
+    image: postgres:16-alpine
+    container_name: salon_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-salon}
+      POSTGRES_USER: ${POSTGRES_USER:-salon_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - salon-postgres-data:/var/lib/postgresql/data
+      - ./backend/src/db/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    networks:
+      - salon_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-salon_app} -d ${POSTGRES_DB:-salon}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  salon-redis:
+    image: redis:7-alpine
+    container_name: salon_redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD:-redispass}
+    networks:
+      - salon_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redispass}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  salon-minio:
+    image: minio/minio:latest
+    container_name: salon_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+    volumes:
+      - salon-minio-data:/data
+    ports:
+      - "9005:9000"
+      - "9006:9001"
+    networks:
+      - salon_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  salon-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: salon_backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3010
+      DATABASE_URL: postgresql://${POSTGRES_USER:-salon_app}:${POSTGRES_PASSWORD}@salon-postgres:5432/${POSTGRES_DB:-salon}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redispass}@salon-redis:6379
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
+      MINIO_ENDPOINT: salon-minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+      MINIO_BUCKET: ${MINIO_BUCKET:-salon-uploads}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      APP_URL: ${APP_URL:-https://salon.somict.com}
+      SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL:-admin@salon.somict.com}
+      SUPER_ADMIN_PASSWORD: ${SUPER_ADMIN_PASSWORD:-Admin@1234}
+    depends_on:
+      salon-postgres:
+        condition: service_healthy
+      salon-redis:
+        condition: service_healthy
+    networks:
+      - salon_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3010/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  salon-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: salon_frontend
+    restart: unless-stopped
+    networks:
+      - salon_network
+    depends_on:
+      - salon-backend
+
+networks:
+  salon_network:
+    name: salon_network
+    driver: bridge
+
+volumes:
+  salon-postgres-data:
+  salon-minio-data:
