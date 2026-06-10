@@ -1,5 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
-import { DollarSign, Users, AlertCircle, Calendar, TrendingUp, Clock } from 'lucide-react'
+import {
+  DollarSign, Users, AlertCircle, Calendar, TrendingUp, Clock,
+  UserPlus, UserCheck, ArrowUp, ArrowDown, Minus,
+} from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -7,10 +10,23 @@ import { StatsCard } from '@/components/common/StatsCard'
 import { accountingApi, appointmentsApi } from '@/lib/api'
 import { useAuthStore } from '@/store/authStore'
 import { formatCurrency, formatDate, statusColor, daysUntil } from '@/lib/utils'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import {
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer,
+} from 'recharts'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { format } from 'date-fns'
+
+function Trend({ current, previous }: { current: number; previous: number }) {
+  if (previous === 0 && current === 0) return <span className="text-xs text-muted-foreground">No data</span>
+  if (previous === 0) return <span className="text-xs text-green-600 flex items-center gap-0.5"><ArrowUp className="h-3 w-3" /> New</span>
+  const pct = Math.round(((current - previous) / previous) * 100)
+  if (pct === 0) return <span className="text-xs text-muted-foreground flex items-center gap-0.5"><Minus className="h-3 w-3" /> Same as last month</span>
+  return pct > 0
+    ? <span className="text-xs text-green-600 flex items-center gap-0.5"><ArrowUp className="h-3 w-3" /> {pct}% vs last month</span>
+    : <span className="text-xs text-red-500 flex items-center gap-0.5"><ArrowDown className="h-3 w-3" /> {Math.abs(pct)}% vs last month</span>
+}
 
 export function DashboardPage() {
   const { user } = useAuthStore()
@@ -25,6 +41,11 @@ export function DashboardPage() {
     queryFn: () => accountingApi.reports.revenue('week').then(r => r.data),
   })
 
+  const { data: customerAnalytics, isLoading: caLoading } = useQuery({
+    queryKey: ['customer-analytics'],
+    queryFn: () => accountingApi.reports.customerAnalytics().then(r => r.data),
+  })
+
   const today = format(new Date(), 'yyyy-MM-dd')
   const { data: todayAppointments } = useQuery({
     queryKey: ['appointments-today', today],
@@ -37,6 +58,9 @@ export function DashboardPage() {
   })
 
   const trialDays = user?.trial_ends_at ? daysUntil(user.trial_ends_at) : null
+
+  const ca = customerAnalytics
+  const totalBuyers = (ca?.new_buyers_this_month || 0) + (ca?.returning_buyers_this_month || 0)
 
   return (
     <div className="space-y-6">
@@ -76,11 +100,11 @@ export function DashboardPage() {
             subtitle="This month"
           />
           <StatsCard
-            title="Pending Invoices"
-            value={stats?.pending_invoices?.count || 0}
-            subtitle={formatCurrency(stats?.pending_invoices?.amount || 0)}
-            icon={AlertCircle}
-            iconColor="text-orange-500"
+            title="Total Customers"
+            value={ca?.total_customers ?? stats?.total_customers ?? '—'}
+            icon={Users}
+            iconColor="text-purple-500"
+            subtitle={ca ? `${ca.new_this_month} new this month` : 'Loading…'}
           />
           <StatsCard
             title="Outstanding Debts"
@@ -97,8 +121,8 @@ export function DashboardPage() {
         </div>
       )}
 
+      {/* Revenue chart + Today's appointments */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Revenue Chart */}
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">Revenue — Last 7 Days</CardTitle>
@@ -109,7 +133,7 @@ export function DashboardPage() {
                 <LineChart data={revenue}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                   <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={d => d.slice(5)} />
-                  <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
                   <Tooltip formatter={(v: number) => formatCurrency(v)} labelFormatter={l => `Date: ${l}`} />
                   <Line type="monotone" dataKey="revenue" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
                 </LineChart>
@@ -122,7 +146,6 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Today's Appointments */}
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Today's Appointments</CardTitle>
@@ -156,11 +179,156 @@ export function DashboardPage() {
         </Card>
       </div>
 
+      {/* ── CUSTOMER ANALYTICS ─────────────────────────────────────────── */}
+      <div>
+        <h2 className="text-lg font-semibold mb-4">Customer Analytics</h2>
+
+        {caLoading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-24" />)}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            {/* Total customers */}
+            <Card>
+              <CardContent className="pt-5">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm text-muted-foreground">Total Customers</p>
+                  <div className="h-8 w-8 rounded-lg bg-purple-100 flex items-center justify-center">
+                    <Users className="h-4 w-4 text-purple-600" />
+                  </div>
+                </div>
+                <p className="text-2xl font-bold">{ca?.total_customers ?? 0}</p>
+                <Trend current={ca?.new_this_month ?? 0} previous={ca?.new_last_month ?? 0} />
+              </CardContent>
+            </Card>
+
+            {/* New this month */}
+            <Card>
+              <CardContent className="pt-5">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm text-muted-foreground">New This Month</p>
+                  <div className="h-8 w-8 rounded-lg bg-green-100 flex items-center justify-center">
+                    <UserPlus className="h-4 w-4 text-green-600" />
+                  </div>
+                </div>
+                <p className="text-2xl font-bold">{ca?.new_this_month ?? 0}</p>
+                <Trend current={ca?.new_this_month ?? 0} previous={ca?.new_last_month ?? 0} />
+              </CardContent>
+            </Card>
+
+            {/* New buyers this month */}
+            <Card>
+              <CardContent className="pt-5">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm text-muted-foreground">First-time Buyers</p>
+                  <div className="h-8 w-8 rounded-lg bg-blue-100 flex items-center justify-center">
+                    <UserPlus className="h-4 w-4 text-blue-600" />
+                  </div>
+                </div>
+                <p className="text-2xl font-bold">{ca?.new_buyers_this_month ?? 0}</p>
+                <p className="text-xs text-muted-foreground">Paid for the first time this month</p>
+              </CardContent>
+            </Card>
+
+            {/* Returning buyers */}
+            <Card>
+              <CardContent className="pt-5">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm text-muted-foreground">Returning Buyers</p>
+                  <div className="h-8 w-8 rounded-lg bg-amber-100 flex items-center justify-center">
+                    <UserCheck className="h-4 w-4 text-amber-600" />
+                  </div>
+                </div>
+                <p className="text-2xl font-bold">{ca?.returning_buyers_this_month ?? 0}</p>
+                {totalBuyers > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {Math.round((ca.returning_buyers_this_month / totalBuyers) * 100)}% retention this month
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Customer growth chart */}
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle className="text-base">New Customers — Last 30 Days</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {caLoading ? (
+                <Skeleton className="h-48 w-full" />
+              ) : ca?.growth?.length > 0 ? (
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={ca.growth} barSize={10}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                    <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={d => d.slice(5)} interval="preserveStartEnd" />
+                    <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                    <Tooltip
+                      formatter={(v: number) => [v, 'New customers']}
+                      labelFormatter={l => `Date: ${l}`}
+                    />
+                    <Bar dataKey="new_customers" fill="hsl(var(--primary))" radius={[3, 3, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-48 flex items-center justify-center text-muted-foreground text-sm">
+                  No customer growth data for the last 30 days.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Top customers */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-3">
+              <CardTitle className="text-base">Top Customers</CardTitle>
+              <Link to="/customers">
+                <Button variant="ghost" size="sm" className="text-xs h-7">View all</Button>
+              </Link>
+            </CardHeader>
+            <CardContent className="p-0">
+              {caLoading ? (
+                <div className="space-y-3 px-6 pb-4">
+                  {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+                </div>
+              ) : ca?.top_customers?.length > 0 ? (
+                <div className="divide-y">
+                  {ca.top_customers.map((c: any, i: number) => (
+                    <div key={i} className="flex items-center gap-3 px-6 py-2.5">
+                      <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary flex-shrink-0">
+                        {i + 1}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{c.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {c.visit_count} visit{c.visit_count !== 1 ? 's' : ''}
+                          {c.last_visit ? ` · last ${formatDate(c.last_visit)}` : ''}
+                        </p>
+                      </div>
+                      <div className="text-sm font-semibold text-green-700 flex-shrink-0">
+                        {formatCurrency(c.total_spent)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="px-6 pb-6 pt-2 text-center text-sm text-muted-foreground">
+                  No customer spending data yet.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
       {/* Recent Invoices */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-base">Recent Invoices</CardTitle>
-          <Link to="/accounting"><Button variant="ghost" size="sm">View all</Button></Link>
+          <CardTitle className="text-base">Recent Sales</CardTitle>
+          <Link to="/sales"><Button variant="ghost" size="sm">View all</Button></Link>
         </CardHeader>
         <CardContent>
           {recentInvoices?.data?.length > 0 ? (
@@ -177,7 +345,7 @@ export function DashboardPage() {
                 <tbody>
                   {recentInvoices.data.map((inv: any) => (
                     <tr key={inv.id} className="border-b last:border-0">
-                      <td className="py-2">{inv.invoice_number}</td>
+                      <td className="py-2 font-mono text-xs">{inv.invoice_number}</td>
                       <td className="py-2 text-muted-foreground">{inv.customer_name || 'Walk-in'}</td>
                       <td className="py-2 text-right font-medium">{formatCurrency(inv.total_amount)}</td>
                       <td className="py-2 text-right">
@@ -190,7 +358,7 @@ export function DashboardPage() {
             </div>
           ) : (
             <div className="text-center py-8 text-muted-foreground text-sm">
-              No invoices yet. <Link to="/accounting" className="text-primary hover:underline">Create your first invoice</Link>
+              No sales yet. <Link to="/pos" className="text-primary hover:underline">Start a checkout</Link>
             </div>
           )}
         </CardContent>

@@ -108,6 +108,7 @@ export const accountingApi = {
     services: () => api.get('/reports/services'),
     customers: () => api.get('/reports/customers'),
     debtAging: () => api.get('/reports/debt-aging'),
+    customerAnalytics: () => api.get('/reports/customer-analytics'),
   },
   stats: () => api.get('/stats'),
 }

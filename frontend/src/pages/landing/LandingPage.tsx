@@ -197,6 +197,12 @@ export function LandingPage() {
             <span className="font-bold">SalonHub</span>
           </div>
           <p className="text-white/40 text-sm">© {new Date().getFullYear()} SalonHub. All rights reserved.</p>
+          <p className="text-white/30 text-xs">
+            Powered by{' '}
+            <a href="https://somict.com" target="_blank" rel="noopener noreferrer" className="hover:text-white/60 transition-colors underline underline-offset-2">
+              SomICT
+            </a>
+          </p>
           <div className="flex gap-6 text-sm text-white/40">
             <a href="#" className="hover:text-white">Privacy</a>
             <a href="#" className="hover:text-white">Terms</a>

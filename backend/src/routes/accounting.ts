@@ -594,4 +594,95 @@ export async function accountingRoutes(fastify: FastifyInstance) {
     })
     return reply.send(result)
   })
+
+  // ── CUSTOMER ANALYTICS ───────────────────────────────────────────────────────
+
+  fastify.get('/reports/customer-analytics', opts, async (request, reply) => {
+    const { shop_id, role } = request.user
+
+    const result = await withRLS({ shopId: shop_id, role }, async (client) => {
+      const [
+        totals,
+        newThisMonth,
+        newLastMonth,
+        retention,
+        topCustomers,
+        growth,
+      ] = await Promise.all([
+        // Total customers
+        client.query(
+          `SELECT COUNT(*) as total FROM customers WHERE shop_id = $1`,
+          [shop_id]
+        ),
+        // New this month
+        client.query(
+          `SELECT COUNT(*) as count FROM customers WHERE shop_id=$1 AND created_at >= DATE_TRUNC('month', NOW())`,
+          [shop_id]
+        ),
+        // New last month
+        client.query(
+          `SELECT COUNT(*) as count FROM customers WHERE shop_id=$1
+           AND created_at >= DATE_TRUNC('month', NOW()) - INTERVAL '1 month'
+           AND created_at < DATE_TRUNC('month', NOW())`,
+          [shop_id]
+        ),
+        // New vs returning this month (based on invoices)
+        client.query(
+          `SELECT
+             COUNT(DISTINCT CASE WHEN visit_count = 1 THEN customer_id END) as new_buyers,
+             COUNT(DISTINCT CASE WHEN visit_count > 1 THEN customer_id END) as returning_buyers
+           FROM (
+             SELECT customer_id, ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY created_at) as visit_count
+             FROM invoices WHERE shop_id=$1 AND customer_id IS NOT NULL
+               AND created_at >= DATE_TRUNC('month', NOW())
+           ) sub`,
+          [shop_id]
+        ),
+        // Top 5 customers by total spent
+        client.query(
+          `SELECT c.first_name || ' ' || c.last_name as name,
+                  c.phone,
+                  COALESCE(c.total_spent, 0) as total_spent,
+                  COUNT(i.id) as visit_count,
+                  MAX(i.created_at) as last_visit
+           FROM customers c
+           LEFT JOIN invoices i ON i.customer_id = c.id AND i.shop_id = $1
+           WHERE c.shop_id = $1
+           GROUP BY c.id, c.first_name, c.last_name, c.phone, c.total_spent
+           ORDER BY total_spent DESC
+           LIMIT 5`,
+          [shop_id]
+        ),
+        // New customers per day — last 30 days
+        client.query(
+          `SELECT TO_CHAR(DATE_TRUNC('day', created_at), 'YYYY-MM-DD') as date,
+                  COUNT(*) as new_customers
+           FROM customers
+           WHERE shop_id=$1 AND created_at >= NOW() - INTERVAL '30 days'
+           GROUP BY 1 ORDER BY 1`,
+          [shop_id]
+        ),
+      ])
+
+      return {
+        total_customers: parseInt(totals.rows[0].total),
+        new_this_month: parseInt(newThisMonth.rows[0].count),
+        new_last_month: parseInt(newLastMonth.rows[0].count),
+        new_buyers_this_month: parseInt(retention.rows[0].new_buyers || '0'),
+        returning_buyers_this_month: parseInt(retention.rows[0].returning_buyers || '0'),
+        top_customers: topCustomers.rows.map(r => ({
+          name: r.name,
+          phone: r.phone,
+          total_spent: parseFloat(r.total_spent),
+          visit_count: parseInt(r.visit_count),
+          last_visit: r.last_visit,
+        })),
+        growth: growth.rows.map(r => ({
+          date: r.date,
+          new_customers: parseInt(r.new_customers),
+        })),
+      }
+    })
+    return reply.send(result)
+  })
 }
